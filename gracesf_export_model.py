@@ -177,7 +177,7 @@ def read_mesh (mesh_info, f):
             idx_buffer.append(-1)
     # Vertices
     f.seek(mesh_info['vert_offset'])
-    uv_stride = (8 * (mesh_info['flags2'] & 0xF) + 4)
+    uv_stride = mesh_info['uv_stride']
     num_uv_maps = mesh_info['flags2'] & 0xF
     verts = []
     norms = []
@@ -210,6 +210,15 @@ def read_mesh (mesh_info, f):
             if i < (count - 1):
                 num_verts = struct.unpack("{}4I".format(e), f.read(16))
                 total_verts += sum(num_verts)
+    elif mesh_info['flags'] & 0xF00 == 0x400:
+        total_verts = mesh_info['total_verts']
+        vert_offset = mesh_info['uv_offset']
+        norm_offset = vert_offset + 12
+        stride = uv_stride
+        f.seek(vert_offset)
+        verts.extend(read_interleaved_floats(f, 3, stride, total_verts))
+        f.seek(norm_offset)
+        norms.extend(read_interleaved_floats(f, 3, stride, total_verts))
     elif mesh_info['flags'] & 0xF00 == 0x700:
         # No weights, so only mesh_info['num_verts'][0] is non-zero
         total_verts = sum(mesh_info['num_verts'])
@@ -217,9 +226,14 @@ def read_mesh (mesh_info, f):
         verts.extend([read_floats(f, 3) for _ in range(total_verts)])
         norms.extend([read_floats(f, 3) for _ in range(total_verts)])
     uv_maps = []
-    for i in range(num_uv_maps):
-        f.seek(mesh_info['uv_offset'] + 4 + (i * 8))
-        uv_maps.append(read_interleaved_floats (f, 2, uv_stride, total_verts))
+    if mesh_info['flags'] & 0xF00 in [0x100, 0x700]:
+        for i in range(num_uv_maps):
+            f.seek(mesh_info['uv_offset'] + 4 + (i * 8))
+            uv_maps.append(read_interleaved_floats (f, 2, uv_stride, total_verts))
+    elif mesh_info['flags'] & 0xF00 == 0x400:
+        for i in range(num_uv_maps):
+            f.seek(mesh_info['uv_offset'] + 28 + (i * 8))
+            uv_maps.append(read_interleaved_floats (f, 2, uv_stride, total_verts))
     fmt = make_fmt(len(uv_maps), True)
     vb = [{'Buffer': verts}, {'Buffer': norms}]
     for uv_map in uv_maps:
@@ -227,7 +241,7 @@ def read_mesh (mesh_info, f):
     if mesh_info['flags'] & 0xF00 == 0x100:
         vb.append({'Buffer': weights})
         vb.append({'Buffer': blend_idx})
-    elif mesh_info['flags'] & 0xF00 == 0x700:
+    elif mesh_info['flags'] & 0xF00 in [0x400, 0x700]:
         vb.append({'Buffer': [[1.0, 0.0, 0.0, 0.0] for _ in range(len(verts))]})
         vb.append({'Buffer': [[0, 0, 0, 0] for _ in range(len(verts))]})
     return({'fmt': fmt, 'vb': vb, 'ib': trianglestrip_to_list(idx_buffer)})
