@@ -644,7 +644,6 @@ def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_b
             skel_struct = read_skel_section (f, toc[0][0])
             meshes, bone_palette_ids, mesh_blocks_info = read_mesh_section (f, toc[1][0], toc[2][0])
             material_struct = read_material_section (f, toc[5][0])
-            write_struct_to_json(material_struct, 'material_info')
             mesh_blocks_info = material_id_to_index(mesh_blocks_info, material_struct)
             vgmap = {'bone_{}'.format(bone_palette_ids[i]):i for i in range(len(bone_palette_ids))}
             if not all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
