@@ -255,7 +255,7 @@ def read_mesh_section (f, start_offset, uv_file):
         dat = {'flags': flags, 'name': name, 'mesh': val1[0], 'submesh': val1[1], 'node': val1[2],
             'material_id': val1[3], 'uv_offset': uv_offset, 'idx_offset': idx_offset,
             'vert_offset': vert_offset, 'num_verts': num_verts[i], 'uv_stride': val2[0], 'flags2': val2[1],
-            'total_verts': val2[2], 'total_idx': val2[3], 'shadow_flag': val2[4]}
+            'total_verts': val2[2], 'total_idx': val2[3], 'unk': val2[4]}
         mesh_blocks_info.append(dat)
     bone_palette_ids = struct.unpack("{}{}I".format(e, palette_count), f.read(4 * palette_count))
     meshes = []
@@ -445,7 +445,7 @@ def write_gltf(base_name, skel_struct, vgmap, mesh_blocks_info, meshes, material
         g_node = {'children': skel_struct[i]['children'], 'name': skel_struct[i]['name'], 'matrix': skel_struct[i]['matrix']}
         gltf_data['nodes'].append(g_node)
     for i in range(len(gltf_data['nodes'])):
-        if len(gltf_data['nodes'][i]['children']) == 0:
+        if len(gltf_data['nodes'][i]['children']) == 0 and i > 0:
             del(gltf_data['nodes'][i]['children'])
     if len(gltf_data['nodes']) == 0:
         gltf_data['nodes'].append({'children': [], 'name': 'root'})
