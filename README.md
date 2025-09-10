@@ -2,7 +2,7 @@
 A script to get the mesh data out of the files from Tales of Graces f (PS3).  The output is in .glb files, although there is an option for .fmt/.ib/.vb/.vgmap that are compatible with DarkStarSword Blender import plugin for 3DMigoto.
 
 ## Credits:
-I am as always very thankful for the dedicated reverse engineers at the Tales of ABCDE discord and the Kiseki modding discord, for their brilliant work, and for sharing that work so freely.
+I am as always very thankful for the dedicated reverse engineers at the Tales of ABCDE discord and the Kiseki modding discord, for their brilliant work, and for sharing that work so freely.  Thank you to NeXoGone and the original author of the noesis scripts for this game for structural information as well!
 
 ## Requirements:
 1. Python 3.10 and newer is required for use of these scripts.  It is free from the Microsoft Store, for Windows users.  For Linux users, please consult your distro.
@@ -13,7 +13,7 @@ I am as always very thankful for the dedicated reverse engineers at the Tales of
 
 ## Usage:
 ### gracesf_export_model.py
-Double click the python script and it will search for all model files (decompressed .MDL files).  Textures should be placed in a `textures` folder.
+Double click the python script and it will search for all model files (decompressed .MDL files).  Textures will be placed in a `textures` folder.
 
 **Command line arguments:**
 `gracesf_export_model.py [-h] [-t] [-d] [-o] mdl_file`

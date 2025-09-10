@@ -335,6 +335,63 @@ def material_id_to_index (mesh_blocks_info, material_struct):
         mesh_blocks_info[i]['material'] = material_dict[mesh_blocks_info[i]['material_id']]
     return(mesh_blocks_info)
 
+def make_dds_header (tex_info):
+    if tex_info['type'] == 'DXT1':
+        dwPitchOrLinearSize = (tex_info['dwHeight'] // 4) * (tex_info['dwWidth'] // 4) * 8
+        pixel_format = {'dwSize': 32, 'dwFlags': 0x4, 'dwFourCC': 'DXT1', 'dwRGBBitCount': 0,
+            'dwRBitMask': 0, 'dwGBitMask': 0, 'dwBBitMask': 0, 'dwABitMask': 0}
+    elif tex_info['type'] == 'DXT5':
+        dwPitchOrLinearSize = (tex_info['dwHeight'] // 4) * (tex_info['dwWidth'] // 4) * 16
+        pixel_format = {'dwSize': 32, 'dwFlags': 0x4, 'dwFourCC': 'DXT5', 'dwRGBBitCount': 0,
+            'dwRBitMask': 0, 'dwGBitMask': 0, 'dwBBitMask': 0, 'dwABitMask': 0}
+    elif tex_info['type'] == 'RGBA32':
+        dwPitchOrLinearSize = (tex_info['dwWidth'] * 32 + 7) // 8
+        pixel_format = {'dwSize': 32, 'dwFlags': 0x41, 'dwFourCC': '\u0000\u0000\u0000\u0000', 'dwRGBBitCount': 32,
+            'dwRBitMask': 0xFF, 'dwGBitMask': 0xFF00, 'dwBBitMask': 0xFF0000, 'dwABitMask': 0xFF000000}
+    else:
+        return(b'')
+    header_info = {'dwSize': 124, 'dwFlags': 0xA1007, 'dwHeight': tex_info['dwHeight'],\
+        'dwWidth': tex_info['dwWidth'], 'dwPitchOrLinearSize': dwPitchOrLinearSize,\
+        'dwDepth': 1, 'dwMipMapCount': tex_info['dwMipMapCount'], 'pixel_format': pixel_format, 'dwCaps': 0x401008,\
+        'dwCaps2': 0, 'dwCaps3': 0, 'dwCaps4': 0}
+    header = b'DDS ' + struct.pack("<18I", *([header_info['dwSize'], header_info['dwFlags'],\
+        header_info['dwHeight'], header_info['dwWidth'], header_info['dwPitchOrLinearSize'],\
+        header_info['dwDepth'], header_info['dwMipMapCount']] + [0 for x in range(11)]))
+    header += struct.pack("<2I", header_info["pixel_format"]['dwSize'], header_info["pixel_format"]['dwFlags'])
+    header += header_info["pixel_format"]['dwFourCC'].encode()
+    header += struct.pack("<5I", header_info["pixel_format"]['dwRGBBitCount'], header_info["pixel_format"]['dwRBitMask'],\
+        header_info["pixel_format"]['dwGBitMask'], header_info["pixel_format"]['dwBBitMask'],\
+        header_info["pixel_format"]['dwABitMask'])
+    header += struct.pack("<5I", header_info['dwCaps'], header_info['dwCaps2'], header_info['dwCaps3'],\
+        header_info['dwCaps4'], 0)
+    return(header)
+
+def read_texture_section (f, start_offset, tex_data_offset, tex_data_block_size):
+    known_tex_types = {-2012960028: 'DXT5', -1476089116: 'DXT5', -2046645532: 'DXT1',
+        -2063291676: 'RGBA32', -1526420764: 'RGBA32'}
+    f.seek(start_offset)
+    header = struct.unpack("{}6I".format(e), f.read(24)) #unk0, size, unk1, num_tex, unk, unk
+    tex_data = []
+    for _ in range(header[3]):
+        data = struct.unpack("{}4i".format(e), f.read(16))
+        name = read_string(f, read_offset(f))
+        tex_offset, = struct.unpack("{}I".format(e), f.read(4))
+        unk, = struct.unpack("{}I".format(e), f.read(4))
+        tex_data.append({'name': name, 'dwWidth': data[0], 'dwHeight': data[1], 'dwMipMapCount': data[2],
+            'type': known_tex_types[data[3]] if data[3] in known_tex_types else 'RAW',
+            'offset': tex_offset + tex_data_offset, 'unk': unk})
+    textures = []
+    for i in range(len(tex_data)):
+        if i < (len(tex_data) - 1):
+            size = tex_data[i+1]['offset'] - tex_data[i]['offset']
+        else:
+            size = (tex_data_offset + tex_data_block_size) - tex_data[i]['offset']
+        f.seek(tex_data[i]['offset'])
+        raw_data = f.read(size)
+        textures.append({'name': "{0}.{1}".format(tex_data[i]['name'], 'raw' if tex_data[i]['type'] == 'RAW' else 'dds'),
+            'data': raw_data if tex_data[i]['type'] == 'RAW' else make_dds_header(tex_data[i]) + raw_data})
+    return(textures)
+
 def convert_format_for_gltf(dxgi_format):
     dxgi_format = dxgi_format.split('DXGI_FORMAT_')[-1]
     dxgi_format_split = dxgi_format.split('_')
@@ -591,6 +648,16 @@ def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_b
             if all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
                 skel_index = {skel_struct[i]['id']:i for i in range(len(skel_struct))}
                 vgmap = {skel_struct[skel_index[bone_palette_ids[i]]]['name']:i for i in range(len(bone_palette_ids))}
+            textures = read_texture_section (f, toc[7][0], toc[8][0], toc[8][2])
+            tex_overwrite = True if overwrite == True else False
+            if os.path.exists('textures') and (os.path.isdir('textures')) and (tex_overwrite == False):
+                if str(input("'textures' folder exists! Overwrite? (y/N) ")).lower()[0:1] == 'y':
+                    tex_overwrite = True
+            if (tex_overwrite == True) or not os.path.exists('textures'):
+                if not os.path.exists('textures'):
+                    os.mkdir('textures')
+                for i in range(len(textures)):
+                    open('textures/' + textures[i]['name'], 'wb').write(textures[i]['data'])
             write_gltf(base_name, skel_struct, vgmap, mesh_blocks_info, meshes, material_struct,\
                 overwrite = overwrite, write_binary_gltf = write_binary_gltf)
             if write_raw_buffers == True:
