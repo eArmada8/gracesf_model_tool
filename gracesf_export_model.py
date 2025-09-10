@@ -177,8 +177,8 @@ def read_mesh (mesh_info, main_f, uv_f):
             idx_buffer.append(-1)
     # Vertices
     main_f.seek(mesh_info['vert_offset'])
-    uv_stride = (8 * 1 + 4) # Does this game have multiple UVs?  Probably in flags
-    num_uv_maps = 1 # Same as above
+    uv_stride = (8 * (mesh_info['flags2'] & 0xF) + 4)
+    num_uv_maps = mesh_info['flags2'] & 0xF
     verts = []
     norms = []
     if mesh_info['flags'] & 0xF00 == 0x100:
@@ -217,7 +217,6 @@ def read_mesh (mesh_info, main_f, uv_f):
         verts.extend([read_floats(main_f, 3) for _ in range(total_verts)])
         norms.extend([read_floats(main_f, 3) for _ in range(total_verts)])
     uv_maps = []
-    assert total_verts == mesh_info['unk'][2]
     for i in range(num_uv_maps):
         uv_f.seek(mesh_info['uv_offset'] + 4 + (i * 8))
         uv_maps.append(read_interleaved_floats (uv_f, 2, uv_stride, total_verts))
@@ -250,12 +249,13 @@ def read_mesh_section (f, start_offset, uv_file):
         uv_offset, = struct.unpack("{}I".format(e), f.read(4))
         idx_offset = read_offset(f)
         vert_offset = read_offset(f)
-        val2 = struct.unpack("{}5I".format(e), f.read(20)) # start of v2 - 2 flags, #verts, #idx, a zero
+        val2 = struct.unpack("{}5I".format(e), f.read(20)) # start of v2 - uv_stride, flags2, #verts, #idx, a zero
         name = read_string(f, read_offset(f))
         name_end_offset = read_offset(f)
         dat = {'flags': flags, 'name': name, 'mesh': val1[0], 'submesh': val1[1], 'node': val1[2],
             'material_id': val1[3], 'uv_offset': uv_offset, 'idx_offset': idx_offset,
-            'vert_offset': vert_offset, 'num_verts': num_verts[i], 'unk': val2}
+            'vert_offset': vert_offset, 'num_verts': num_verts[i], 'uv_stride': val2[0], 'flags2': val2[1],
+            'total_verts': val2[2], 'total_idx': val2[3], 'shadow_flag': val2[4]}
         mesh_blocks_info.append(dat)
     bone_palette_ids = struct.unpack("{}{}I".format(e, palette_count), f.read(4 * palette_count))
     meshes = []
@@ -264,33 +264,69 @@ def read_mesh_section (f, start_offset, uv_file):
             meshes.append(read_mesh(mesh_blocks_info[i], f, uv_f))
     return(meshes, bone_palette_ids, mesh_blocks_info)
 
+def repair_mesh_weights (meshes, bone_palette_ids, skel_struct):
+    used_groups_buffer = []
+    for i in range(len(meshes)):
+        for j in range(len(meshes[i]['vb'][0]['Buffer'])):
+            total, k = 0.0, 0
+            while total < 1.0 and k < 4:
+                total += meshes[i]['vb'][-2]['Buffer'][j][k]
+                k += 1
+            used_groups_buffer.extend(meshes[i]['vb'][-1]['Buffer'][j][:k])
+    used_groups = sorted(list(set(used_groups_buffer)))
+    new_palette_ids = [bone_palette_ids[i] for i in range(len(bone_palette_ids)) if i in used_groups]
+    if all([y in [x['id'] for x in skel_struct] for y in new_palette_ids]):
+        old_to_new = {used_groups[i]:i for i in range(len(used_groups))}
+        for i in range(len(meshes)):
+            new_wt_buffer = []
+            for j in range(len(meshes[i]['vb'][0]['Buffer'])):
+                new_wt = []
+                total, k = 0.0, 0
+                while total < 1.0 and k < 4:
+                    total += meshes[i]['vb'][-2]['Buffer'][j][k]
+                    new_wt.append(old_to_new[meshes[i]['vb'][-1]['Buffer'][j][k]])
+                    k += 1
+                while k < 4:
+                    new_wt.append(0)
+                    k += 1
+                new_wt_buffer.append(new_wt)
+            meshes[i]['vb'][-1]['Buffer'] = new_wt_buffer
+        return(meshes, new_palette_ids)
+    else:
+        return(meshes, bone_palette_ids) # Could not remap, return original values
+
 def read_material_section (f, start_offset):
     f.seek(start_offset)
     header = struct.unpack("{}5I".format(e), f.read(20)) #unk0, size, unk1, num_mats, maybe num_tex?
     num_materials = header[3]
     set_0 = []
     for _ in range(num_materials):
-        data0 = list(struct.unpack("{}3if6i".format(e), f.read(40)))
-        more_ints = (data0[0] - 1) * 2
+        num_tex, internal_id = struct.unpack("{}2i".format(e), f.read(8))
+        data0 = list(struct.unpack("{}if6i".format(e), f.read(32)))
+        more_ints = (num_tex - 1) * 2
         data0.extend(struct.unpack("{}{}i".format(e, more_ints), f.read(more_ints * 4)))
-        set_0.append(data0)
+        set_0.append({'num_tex': num_tex, 'internal_id': internal_id, 'data0': data0})
     unk, = struct.unpack("{}I".format(e), f.read(4))
     set_1 = []
-    for _ in range(num_materials):
+    for i in range(num_materials):
         name = read_string(f, read_offset(f))
         end_offset = read_offset(f)
         unk1, = struct.unpack("{}I".format(e), f.read(4))
-        tex_names = [read_string(f, read_offset(f))] # There might be more, coming up?
-        unk2 = struct.unpack("{}2I".format(e), f.read(8))
-        set_1.append({'name': name, 'tex_names': tex_names, 'unk': [unk, unk2]})
+        tex_names = []
+        for _ in range(set_0[i]['num_tex']):
+            tex_name = read_string(f, read_offset(f))
+            tex_val, = struct.unpack("{}I".format(e), f.read(4))
+            tex_names.append([tex_name, tex_val])
+        unk2 = struct.unpack("{}I".format(e), f.read(4))
+        set_1.append({'name': name, 'tex_names': tex_names, 'unk': [unk1, unk2]})
     material_struct = []
     if len(set_0) == len(set_1):
         for i in range(len(set_0)):
             material = {'name': set_1[i]['name']}
-            material['textures'] = set_1[i]['tex_names']
+            material['textures'] = [x[0] for x in set_1[i]['tex_names']]
             material['alpha'] = 1 #need to work this out
-            material['internal_id'] = set_0[i][1]
-            material['unk_parameters'] = {'set_0': set_0[i], 'set_1': set_1[i]['unk']}
+            material['internal_id'] = set_0[i]['internal_id']
+            material['unk_parameters'] = {'set_0': set_0[i]['data0'], 'set_1': set_1[i]['unk']}
             material_struct.append(material)
     return (material_struct)
 
@@ -553,6 +589,8 @@ def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_b
             material_struct = read_material_section (f, toc[5][0])
             mesh_blocks_info = material_id_to_index(mesh_blocks_info, material_struct)
             vgmap = {'bone_{}'.format(bone_palette_ids[i]):i for i in range(len(bone_palette_ids))}
+            if not all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
+                meshes, bone_palette_ids = repair_mesh_weights(meshes, bone_palette_ids, skel_struct)
             if all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
                 skel_index = {skel_struct[i]['id']:i for i in range(len(skel_struct))}
                 vgmap = {skel_struct[skel_index[bone_palette_ids[i]]]['name']:i for i in range(len(bone_palette_ids))}
