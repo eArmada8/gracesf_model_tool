@@ -11,7 +11,7 @@
 # GitHub eArmada8/gracesf_model_tool
 
 try:
-    import struct, json, io, numpy, copy, glob, os, sys
+    import struct, json, numpy, copy, glob, os, sys
     from lib_fmtibvb import *
 except ModuleNotFoundError as e:
     print("Python module missing! {}".format(e.msg))
@@ -139,7 +139,7 @@ def make_fmt(num_uvs, has_weights = True):
     fmt['elements'] = elements
     return(fmt)
 
-def read_mesh (mesh_info, main_f, uv_f):
+def read_mesh (mesh_info, f):
     def read_floats (f, num):
         return(list(struct.unpack("{0}{1}f".format(e, num), f.read(num * 4))))
     def read_bytes (f, num):
@@ -162,21 +162,21 @@ def read_mesh (mesh_info, main_f, uv_f):
         for _ in range(3):
             weights = [x+[round(1-sum(x),6)] if len(x) < 4 else x for x in weights]
         return(weights)
-    main_f.seek(mesh_info['idx_offset'])
-    count, = struct.unpack("{}I".format(e), main_f.read(4))
+    f.seek(mesh_info['idx_offset'])
+    count, = struct.unpack("{}I".format(e), f.read(4))
     # sub_counts is (number of vertices, number of indices) per count
-    sub_counts = [struct.unpack("{}2H".format(e), main_f.read(4)) for _ in range(count)]
+    sub_counts = [struct.unpack("{}2H".format(e), f.read(4)) for _ in range(count)]
     # Indices
     idx_buffer = []
     for i in range(count):
-        idx_subbuffer = list(struct.unpack("{0}{1}h".format(e, sub_counts[i][1]), main_f.read(sub_counts[i][1] * 2)))
+        idx_subbuffer = list(struct.unpack("{0}{1}h".format(e, sub_counts[i][1]), f.read(sub_counts[i][1] * 2)))
         if i > 0:
             idx_subbuffer = [x+sum([x[0] for x in sub_counts][0:i]) if not x == -1 else x for x in idx_subbuffer]
         idx_buffer.extend(idx_subbuffer)
         if i < (count - 1):
             idx_buffer.append(-1)
     # Vertices
-    main_f.seek(mesh_info['vert_offset'])
+    f.seek(mesh_info['vert_offset'])
     uv_stride = (8 * (mesh_info['flags2'] & 0xF) + 4)
     num_uv_maps = mesh_info['flags2'] & 0xF
     verts = []
@@ -188,38 +188,38 @@ def read_mesh (mesh_info, main_f, uv_f):
         total_verts = sum(num_verts)
         for i in range(count): # should always be 1 here I think
             for j in range(len(num_verts)):
-                vert_offset = main_f.tell()
+                vert_offset = f.tell()
                 norm_offset = vert_offset + 12
                 blend_idx_offset = norm_offset + 12
                 weights_offset = blend_idx_offset + 4
                 stride = 28 + (j * 4)
-                end_offset = main_f.tell() + (num_verts[j] * stride)
-                main_f.seek(vert_offset)
-                verts.extend(read_interleaved_floats(main_f, 3, stride, num_verts[j]))
-                main_f.seek(norm_offset)
-                norms.extend(read_interleaved_floats(main_f, 3, stride, num_verts[j]))
-                main_f.seek(blend_idx_offset)
-                blend_idx.extend(read_interleaved_bytes(main_f, 4, stride, num_verts[j]))
+                end_offset = f.tell() + (num_verts[j] * stride)
+                f.seek(vert_offset)
+                verts.extend(read_interleaved_floats(f, 3, stride, num_verts[j]))
+                f.seek(norm_offset)
+                norms.extend(read_interleaved_floats(f, 3, stride, num_verts[j]))
+                f.seek(blend_idx_offset)
+                blend_idx.extend(read_interleaved_bytes(f, 4, stride, num_verts[j]))
                 if j > 0:
-                    main_f.seek(weights_offset)
-                    weights.extend(read_interleaved_floats(main_f, j, stride, num_verts[j]))
+                    f.seek(weights_offset)
+                    weights.extend(read_interleaved_floats(f, j, stride, num_verts[j]))
                 else:
                     weights.extend([[1.0] for _ in range(num_verts[j])])
-                main_f.seek(end_offset)
+                f.seek(end_offset)
             weights = fix_weights(weights)
             if i < (count - 1):
-                num_verts = struct.unpack("{}4I".format(e), main_f.read(16))
+                num_verts = struct.unpack("{}4I".format(e), f.read(16))
                 total_verts += sum(num_verts)
     elif mesh_info['flags'] & 0xF00 == 0x700:
         # No weights, so only mesh_info['num_verts'][0] is non-zero
         total_verts = sum(mesh_info['num_verts'])
-        vert_offset = main_f.tell()
-        verts.extend([read_floats(main_f, 3) for _ in range(total_verts)])
-        norms.extend([read_floats(main_f, 3) for _ in range(total_verts)])
+        vert_offset = f.tell()
+        verts.extend([read_floats(f, 3) for _ in range(total_verts)])
+        norms.extend([read_floats(f, 3) for _ in range(total_verts)])
     uv_maps = []
     for i in range(num_uv_maps):
-        uv_f.seek(mesh_info['uv_offset'] + 4 + (i * 8))
-        uv_maps.append(read_interleaved_floats (uv_f, 2, uv_stride, total_verts))
+        f.seek(mesh_info['uv_offset'] + 4 + (i * 8))
+        uv_maps.append(read_interleaved_floats (f, 2, uv_stride, total_verts))
     fmt = make_fmt(len(uv_maps), True)
     vb = [{'Buffer': verts}, {'Buffer': norms}]
     for uv_map in uv_maps:
@@ -232,7 +232,7 @@ def read_mesh (mesh_info, main_f, uv_f):
         vb.append({'Buffer': [[0, 0, 0, 0] for _ in range(len(verts))]})
     return({'fmt': fmt, 'vb': vb, 'ib': trianglestrip_to_list(idx_buffer)})
 
-def read_mesh_section (f, start_offset, uv_file):
+def read_mesh_section (f, start_offset, uv_start_offset):
     f.seek(start_offset)
     header = struct.unpack("{}9I".format(e), f.read(36)) #unk0, size, unk1, num_meshes, palette_count, unknown * 4
     num_meshes = header[3]
@@ -253,15 +253,14 @@ def read_mesh_section (f, start_offset, uv_file):
         name = read_string(f, read_offset(f))
         name_end_offset = read_offset(f)
         dat = {'flags': flags, 'name': name, 'mesh': val1[0], 'submesh': val1[1], 'node': val1[2],
-            'material_id': val1[3], 'uv_offset': uv_offset, 'idx_offset': idx_offset,
+            'material_id': val1[3], 'uv_offset': uv_offset + uv_start_offset, 'idx_offset': idx_offset,
             'vert_offset': vert_offset, 'num_verts': num_verts[i], 'uv_stride': val2[0], 'flags2': val2[1],
             'total_verts': val2[2], 'total_idx': val2[3], 'unk': val2[4]}
         mesh_blocks_info.append(dat)
     bone_palette_ids = struct.unpack("{}{}I".format(e, palette_count), f.read(4 * palette_count))
     meshes = []
-    with io.BytesIO(uv_file) as uv_f:
-        for i in range(num_meshes):
-            meshes.append(read_mesh(mesh_blocks_info[i], f, uv_f))
+    for i in range(num_meshes):
+        meshes.append(read_mesh(mesh_blocks_info[i], f))
     return(meshes, bone_palette_ids, mesh_blocks_info)
 
 def repair_mesh_weights (meshes, bone_palette_ids, skel_struct):
@@ -583,9 +582,7 @@ def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_b
             for i in range(header[0]):
                 toc.append(struct.unpack("{}3I".format(e), f.read(12))) # offset, padded length, true length
             skel_struct = read_skel_section (f, toc[0][0])
-            f.seek(toc[2][0])
-            uv_file = f.read(toc[2][2])
-            meshes, bone_palette_ids, mesh_blocks_info = read_mesh_section (f, toc[1][0], uv_file)
+            meshes, bone_palette_ids, mesh_blocks_info = read_mesh_section (f, toc[1][0], toc[2][0])
             material_struct = read_material_section (f, toc[5][0])
             mesh_blocks_info = material_id_to_index(mesh_blocks_info, material_struct)
             vgmap = {'bone_{}'.format(bone_palette_ids[i]):i for i in range(len(bone_palette_ids))}
