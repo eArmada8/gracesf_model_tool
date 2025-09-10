@@ -301,9 +301,10 @@ def read_material_section (f, start_offset):
     set_0 = []
     for _ in range(num_materials):
         num_tex, internal_id = struct.unpack("{}2i".format(e), f.read(8))
-        data0 = list(struct.unpack("{}if6i".format(e), f.read(32)))
-        more_ints = (num_tex - 1) * 2
-        data0.extend(struct.unpack("{}{}i".format(e, more_ints), f.read(more_ints * 4)))
+        data0 = list(struct.unpack("{}if4i".format(e), f.read(24)))
+        if num_tex > 0:
+            more_ints = (num_tex) * 2
+            data0.extend(struct.unpack("{}{}i".format(e, more_ints), f.read(more_ints * 4)))
         set_0.append({'num_tex': num_tex, 'internal_id': internal_id, 'data0': data0})
     unk, = struct.unpack("{}I".format(e), f.read(4))
     set_1 = []
@@ -474,21 +475,23 @@ def write_gltf(base_name, skel_struct, vgmap, mesh_blocks_info, meshes, material
     giant_buffer = bytes()
     buffer_view = 0
     # Materials
-    material_dict = [{'name': material_struct[i]['name'], 'texture': material_struct[i]['textures'][0],
+    material_dict = [{'name': material_struct[i]['name'],
+        'texture': material_struct[i]['textures'][0] if len(material_struct[i]['textures']) > 0 else '',
         'alpha': material_struct[i]['alpha'] if 'alpha' in material_struct[i] else 0}
         for i in range(len(material_struct))]
-    texture_list = sorted(list(set([x['texture'] for x in material_dict])))
+    texture_list = sorted(list(set([x['texture'] for x in material_dict if not x['texture'] == ''])))
     gltf_data['images'] = [{'uri':'textures/{}.dds'.format(x)} for x in texture_list]
     for mat in material_dict:
         material = { 'name': mat['name'] }
-        sampler = { 'wrapS': 10497, 'wrapT': 10497 } # I have no idea if this setting exists
-        texture = { 'source': texture_list.index(mat['texture']), 'sampler': len(gltf_data['samplers']) }
-        material['pbrMetallicRoughness']= { 'baseColorTexture' : { 'index' : len(gltf_data['textures']), },\
-            'metallicFactor' : 0.0, 'roughnessFactor' : 1.0 }
+        material['pbrMetallicRoughness'] = { 'metallicFactor' : 0.0, 'roughnessFactor' : 1.0 }
+        if not mat['texture'] == '':
+            sampler = { 'wrapS': 10497, 'wrapT': 10497 } # I have no idea if this setting exists
+            texture = { 'source': texture_list.index(mat['texture']), 'sampler': len(gltf_data['samplers']) }
+            material['pbrMetallicRoughness']['baseColorTexture'] = { 'index' : len(gltf_data['textures']), }
+            gltf_data['samplers'].append(sampler)
+            gltf_data['textures'].append(texture)
         if mat['alpha'] & 1:
             material['alphaMode'] = 'MASK'
-        gltf_data['samplers'].append(sampler)
-        gltf_data['textures'].append(texture)
         gltf_data['materials'].append(material)
     material_list = [x['name'] for x in gltf_data['materials']]
     missing_textures = [x['uri'] for x in gltf_data['images'] if not os.path.exists(x['uri'])]
@@ -641,6 +644,7 @@ def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_b
             skel_struct = read_skel_section (f, toc[0][0])
             meshes, bone_palette_ids, mesh_blocks_info = read_mesh_section (f, toc[1][0], toc[2][0])
             material_struct = read_material_section (f, toc[5][0])
+            write_struct_to_json(material_struct, 'material_info')
             mesh_blocks_info = material_id_to_index(mesh_blocks_info, material_struct)
             vgmap = {'bone_{}'.format(bone_palette_ids[i]):i for i in range(len(bone_palette_ids))}
             if not all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
@@ -649,7 +653,7 @@ def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_b
                 skel_index = {skel_struct[i]['id']:i for i in range(len(skel_struct))}
                 vgmap = {skel_struct[skel_index[bone_palette_ids[i]]]['name']:i for i in range(len(bone_palette_ids))}
             textures = read_texture_section (f, toc[7][0], toc[8][0], toc[8][2])
-            tex_overwrite = True if overwrite == True else False
+            tex_overwrite = True # if overwrite == True else False
             if os.path.exists('textures') and (os.path.isdir('textures')) and (tex_overwrite == False):
                 if str(input("'textures' folder exists! Overwrite? (y/N) ")).lower()[0:1] == 'y':
                     tex_overwrite = True
