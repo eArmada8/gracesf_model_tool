@@ -35,10 +35,7 @@ Overwrite existing files without prompting.
 Double click the python script and it will search for all texture files (decompressed .TEX files).  Textures will be placed in a `textures` folder.  *Requires `gracesf_export_model.py` and `lib_fmtibvb.py` to be in the same folder due to shared decoding functions.*
 
 **Command line arguments:**
-`gracesf_export_texfiles.py [-h] [-o] tex_file`
+`gracesf_export_texfiles.py [-h] tex_file`
 
 `-h, --help`
 Shows help message.
-
-`-o, --overwrite`
-Overwrite existing files without prompting.

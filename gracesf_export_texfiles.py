@@ -21,7 +21,7 @@ except ModuleNotFoundError as e:
 # Global variable, do not edit
 e = '<'
 
-def process_tex (tex_file, overwrite = False):
+def process_tex (tex_file):
     print("Processing {}...".format(tex_file))
     base_name = tex_file[:-4]
     with open(tex_file, 'rb') as f:
@@ -35,14 +35,10 @@ def process_tex (tex_file, overwrite = False):
             for i in range(header[0]):
                 toc.append(struct.unpack("{}3I".format(e), f.read(12))) # offset, padded length, true length
             textures = read_texture_section (f, toc[0][0], toc[1][0], toc[1][2])
-            if os.path.exists('textures') and (os.path.isdir('textures')) and (overwrite == False):
-                if str(input("'textures' folder exists! Overwrite? (y/N) ")).lower()[0:1] == 'y':
-                    overwrite = True
-            if (overwrite == True) or not os.path.exists('textures'):
-                if not os.path.exists('textures'):
-                    os.mkdir('textures')
-                for i in range(len(textures)):
-                    open('textures/' + textures[i]['name'], 'wb').write(textures[i]['data'])
+            if not os.path.exists('textures'):
+                os.mkdir('textures')
+            for i in range(len(textures)):
+                open('textures/' + textures[i]['name'], 'wb').write(textures[i]['data'])
     return True
 
 
@@ -56,11 +52,10 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         import argparse
         parser = argparse.ArgumentParser()
-        parser.add_argument('-o', '--overwrite', help="Overwrite existing files", action="store_true")
         parser.add_argument('tex_file', help="Name of model file to process.")
         args = parser.parse_args()
         if os.path.exists(args.tex_file) and args.tex_file[-4:].upper() == '.TEX':
-            process_tex(args.tex_file, overwrite = args.overwrite)
+            process_tex(args.tex_file)
     else:
         tex_files = glob.glob('*.TEX')
         for tex_file in tex_files:
