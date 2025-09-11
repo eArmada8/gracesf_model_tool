@@ -344,8 +344,8 @@ def read_material_section (f, start_offset):
             material_struct.append(material)
     return (material_struct)
 
-def material_id_to_index (mesh_blocks_info, material_struct):
-    material_dict = {material_struct[i]['internal_id']: i for i in range(len(material_struct))}
+def material_id_to_index (mesh_blocks_info, material_struct, offset):
+    material_dict = {material_struct[i]['internal_id']: i + offset for i in range(len(material_struct))}
     for i in range(len(mesh_blocks_info)):
         mesh_blocks_info[i]['material'] = material_dict[mesh_blocks_info[i]['material_id']]
     return(mesh_blocks_info)
@@ -470,7 +470,7 @@ def fix_strides(submesh):
         offset += submesh['vb'][i]['stride']
     return(submesh)
 
-def write_gltf(base_name, skel_struct, vgmap, mesh_blocks_info, meshes, material_struct,\
+def write_gltf(base_name, skel_struct, vgmaps, mesh_blocks_info, meshes, material_struct,\
         overwrite = False, write_binary_gltf = True):
     gltf_data = {}
     gltf_data['asset'] = { 'version': '2.0' }
@@ -524,20 +524,27 @@ def write_gltf(base_name, skel_struct, vgmap, mesh_blocks_info, meshes, material
         gltf_data['nodes'].append({'children': [], 'name': 'root'})
     # Mesh nodes will be attached to the first node since in the original model, they don't really have a home
     node_id_list = [x['id'] for x in skel_struct]
-    mesh_node_ids = {x['mesh']:x['name'] for x in mesh_blocks_info}
+    for i in range(len(mesh_blocks_info)):
+        mesh_blocks_info[i]['mesh_v'] = '{0}_{1:02d}'.format(mesh_blocks_info[i]['mesh'], mesh_blocks_info[i]['vgmap'])
+    mesh_node_ids = {x['mesh_v']:x['name'] for x in mesh_blocks_info}
     for mesh_node_id in mesh_node_ids:
         if not mesh_node_id in node_id_list:
             g_node = {'name': mesh_node_ids[mesh_node_id]}
             gltf_data['nodes'][0]['children'].append(len(gltf_data['nodes']))
             gltf_data['nodes'].append(g_node)
-    mesh_block_tree = {x:[i for i in range(len(mesh_blocks_info)) if mesh_blocks_info[i]['mesh'] == x] for x in mesh_node_ids}
+    mesh_block_tree = {x:[i for i in range(len(mesh_blocks_info)) if mesh_blocks_info[i]['mesh_v'] == x] for x in mesh_node_ids}
     node_list = [x['name'] for x in gltf_data['nodes']]
     # Skin matrices
     skinning_possible = True
     try:
-        vgmap_nodes = [node_list.index(x) for x in list(vgmap.keys())]
-        ibms = [skel_struct[j]['inv_matrix'] for j in vgmap_nodes]
-        inv_mtx_buffer = b''.join([struct.pack("<16f", *x) for x in ibms])
+        ibms_struct = []
+        inv_mtx_buffers = []
+        for vgmap in vgmaps:
+            vgmap_nodes = [node_list.index(x) for x in list(vgmap.keys())]
+            ibms = [skel_struct[j]['inv_matrix'] for j in vgmap_nodes]
+            inv_mtx_buffer = b''.join([struct.pack("<16f", *x) for x in ibms])
+            ibms_struct.append(ibms)
+            inv_mtx_buffers.append(inv_mtx_buffer)
     except ValueError:
         skinning_possible = False
     # Meshes
@@ -605,22 +612,22 @@ def write_gltf(base_name, skel_struct, vgmap, mesh_blocks_info, meshes, material
             if mesh_node_ids[mesh] in node_list: # One of the new nodes
                 node_id = node_list.index(mesh_node_ids[mesh])
             else: # One of the pre-assigned nodes
-                node_id = node_id_list.index(mesh_blocks_info[i]["mesh"])
+                node_id = node_id_list.index(mesh_blocks_info[i]["mesh_v"])
             gltf_data['nodes'][node_id]['mesh'] = len(gltf_data['meshes'])
             gltf_data['meshes'].append({"primitives": primitives, "name": mesh_node_ids[mesh]})
             # Skinning
-            if len(vgmap) > 0 and skinning_possible == True:
+            if len(vgmaps[mesh_blocks_info[i]["vgmap"]]) > 0 and skinning_possible == True:
                 gltf_data['nodes'][node_id]['skin'] = len(gltf_data['skins'])
                 gltf_data['skins'].append({"inverseBindMatrices": len(gltf_data['accessors']),\
-                    "joints": [node_list.index(x) for x in vgmap]})
+                    "joints": [node_list.index(x) for x in vgmaps[mesh_blocks_info[i]["vgmap"]]]})
                 gltf_data['accessors'].append({"bufferView" : len(gltf_data['bufferViews']),\
                     "componentType": 5126,\
-                    "count": len(ibms),\
+                    "count": len(ibms_struct[mesh_blocks_info[i]["vgmap"]]),\
                     "type": "MAT4"})
                 gltf_data['bufferViews'].append({"buffer": 0,\
                     "byteOffset": len(giant_buffer),\
-                    "byteLength": len(inv_mtx_buffer)})
-                giant_buffer += inv_mtx_buffer
+                    "byteLength": len(inv_mtx_buffers[mesh_blocks_info[i]["vgmap"]])})
+                giant_buffer += inv_mtx_buffers[mesh_blocks_info[i]["vgmap"]]
     # Write GLB
     gltf_data['buffers'].append({"byteLength": len(giant_buffer)})
     if (os.path.exists(base_name + '.gltf') or os.path.exists(base_name + '.glb')) and (overwrite == False):
@@ -651,21 +658,62 @@ def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_b
         magic = f.read(4)
         if magic == b'FPS4':
             header = struct.unpack("{}6I".format(e), f.read(24))
-            assert header[0] == 10
             toc = []
             for i in range(header[0]):
                 toc.append(struct.unpack("{}3I".format(e), f.read(12))) # offset, padded length, true length
-            skel_struct = read_skel_section (f, toc[0][0])
-            meshes, bone_palette_ids, mesh_blocks_info = read_mesh_section (f, toc[1][0], toc[2][0])
-            material_struct = read_material_section (f, toc[5][0])
-            mesh_blocks_info = material_id_to_index(mesh_blocks_info, material_struct)
-            vgmap = {'bone_{}'.format(bone_palette_ids[i]):i for i in range(len(bone_palette_ids))}
-            if not all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
-                meshes, bone_palette_ids = repair_mesh_weights(meshes, bone_palette_ids, skel_struct)
-            if all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
-                skel_index = {skel_struct[i]['id']:i for i in range(len(skel_struct))}
-                vgmap = {skel_struct[skel_index[bone_palette_ids[i]]]['name']:i for i in range(len(bone_palette_ids))}
-            textures = read_texture_section (f, toc[7][0], toc[8][0], toc[8][2])
+            vgmaps = []
+            magic2 = f.read(4)
+            if magic2 == b'sing': # Single model mode
+                skel_struct = read_skel_section (f, toc[0][0])
+                meshes, bone_palette_ids, mesh_blocks_info = read_mesh_section (f, toc[1][0], toc[2][0])
+                material_struct = read_material_section (f, toc[5][0])
+                mesh_blocks_info = material_id_to_index(mesh_blocks_info, material_struct, 0)
+                vgmap = {'bone_{}'.format(bone_palette_ids[i]):i for i in range(len(bone_palette_ids))}
+                if not all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
+                    meshes, bone_palette_ids = repair_mesh_weights(meshes, bone_palette_ids, skel_struct)
+                if all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
+                    skel_index = {skel_struct[i]['id']:i for i in range(len(skel_struct))}
+                    vgmap = {skel_struct[skel_index[bone_palette_ids[i]]]['name']:i for i in range(len(bone_palette_ids))}
+                for i in range(len(mesh_blocks_info)):
+                    mesh_blocks_info[i]['vgmap'] = len(vgmaps)
+                vgmaps.append(vgmap)
+                textures = read_texture_section (f, toc[7][0], toc[8][0], toc[8][2])
+            elif magic2 == b'mult': # Multi model mode
+                meshes, mesh_blocks_info, material_struct, textures = [], [], [], []
+                for i in range(len(toc)):
+                    f.seek(toc[i][0])
+                    dat = f.read(toc[i][2])
+                    with io.BytesIO(dat) as f2:
+                        magic_i = f2.read(4)
+                        if magic_i == b'FPS4':
+                            header_i = struct.unpack("{}6I".format(e), f2.read(24))
+                            toc_i = []
+                            for i in range(header_i[0]):
+                                toc_i.append(struct.unpack("{}3I".format(e), f2.read(12))) # offset, padded length, true length
+                            magic2_i = f2.read(4)
+                            if magic2_i == b'base': # Skeleton mode
+                                skel_struct = read_skel_section (f2, toc_i[0][0])
+                                write_struct_to_json(skel_struct,'skel')
+                            elif magic2_i == b'part':
+                                meshes_i, bone_palette_ids, mesh_blocks_info_i = read_mesh_section (f2, toc_i[0][0], toc_i[1][0])
+                                material_struct_i = read_material_section (f2, toc_i[4][0])
+                                mesh_blocks_info_i = material_id_to_index(mesh_blocks_info_i, material_struct_i, len(material_struct))
+                                meshes.extend(meshes_i)
+                                material_struct.extend(material_struct_i)
+                                vgmap = {'bone_{}'.format(bone_palette_ids[i]):i for i in range(len(bone_palette_ids))}
+                                if not all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
+                                    meshes, bone_palette_ids = repair_mesh_weights(meshes, bone_palette_ids, skel_struct)
+                                if all([y in [x['id'] for x in skel_struct] for y in bone_palette_ids]):
+                                    skel_index = {skel_struct[i]['id']:i for i in range(len(skel_struct))}
+                                    vgmap = {skel_struct[skel_index[bone_palette_ids[i]]]['name']:i for i in range(len(bone_palette_ids))}
+                                for i in range(len(mesh_blocks_info_i)):
+                                    mesh_blocks_info_i[i]['vgmap'] = len(vgmaps)
+                                vgmaps.append(vgmap)
+                                mesh_blocks_info.extend(mesh_blocks_info_i)
+                                textures.extend(read_texture_section(f2, toc_i[5][0], toc_i[6][0], toc_i[6][2]))
+            else:
+                print("{} is not the expected model format, skipping!".format(mdl_file))
+                return
             tex_overwrite = True # if overwrite == True else False
             if os.path.exists('textures') and (os.path.isdir('textures')) and (tex_overwrite == False):
                 if str(input("'textures' folder exists! Overwrite? (y/N) ")).lower()[0:1] == 'y':
@@ -675,7 +723,7 @@ def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_b
                     os.mkdir('textures')
                 for i in range(len(textures)):
                     open('textures/' + textures[i]['name'], 'wb').write(textures[i]['data'])
-            write_gltf(base_name, skel_struct, vgmap, mesh_blocks_info, meshes, material_struct,\
+            write_gltf(base_name, skel_struct, vgmaps, mesh_blocks_info, meshes, material_struct,\
                 overwrite = overwrite, write_binary_gltf = write_binary_gltf)
             if write_raw_buffers == True:
                 if os.path.exists(base_name) and (os.path.isdir(base_name)) and (overwrite == False):
