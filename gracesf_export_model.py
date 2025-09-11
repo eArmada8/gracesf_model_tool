@@ -359,10 +359,10 @@ def make_dds_header (tex_info):
         dwPitchOrLinearSize = (tex_info['dwHeight'] // 4) * (tex_info['dwWidth'] // 4) * 16
         pixel_format = {'dwSize': 32, 'dwFlags': 0x4, 'dwFourCC': 'DXT5', 'dwRGBBitCount': 0,
             'dwRBitMask': 0, 'dwGBitMask': 0, 'dwBBitMask': 0, 'dwABitMask': 0}
-    elif tex_info['type'] == 'RGBA32':
+    elif tex_info['type'] == 'BGRA32':
         dwPitchOrLinearSize = (tex_info['dwWidth'] * 32 + 7) // 8
         pixel_format = {'dwSize': 32, 'dwFlags': 0x41, 'dwFourCC': '\u0000\u0000\u0000\u0000', 'dwRGBBitCount': 32,
-            'dwRBitMask': 0xFF, 'dwGBitMask': 0xFF00, 'dwBBitMask': 0xFF0000, 'dwABitMask': 0xFF000000}
+            'dwRBitMask': 0xFF0000, 'dwGBitMask': 0xFF00, 'dwBBitMask': 0xFF, 'dwABitMask': 0xFF000000}
     else:
         return(b'')
     header_info = {'dwSize': 124, 'dwFlags': 0xA1007, 'dwHeight': tex_info['dwHeight'],\
@@ -381,19 +381,25 @@ def make_dds_header (tex_info):
         header_info['dwCaps4'], 0)
     return(header)
 
+def endian_swap_argb (raw_tex_data):
+    len_ = len(raw_tex_data) // 4
+    vals = struct.unpack(">{}I".format(len_), raw_tex_data)
+    return(struct.pack("<{}I".format(len_), *vals))
+
 def read_texture_section (f, start_offset, tex_data_offset, tex_data_block_size):
-    known_tex_types = {-2012960028: 'DXT5', -1476089116: 'DXT5', -2046645532: 'DXT1',
-        -2063291676: 'RGBA32', -1526420764: 'RGBA32'}
+    known_tex_types = {0x85: 'BGRA32', 0x86: 'DXT1', 0x88: 'DXT5',
+        0xa5: 'BGRA32', 0xa6: 'DXT1', 0xa8: 'DXT5'}
     f.seek(start_offset)
     header = struct.unpack("{}6I".format(e), f.read(24)) #unk0, size, unk1, num_tex, unk, unk
     tex_data = []
     for _ in range(header[3]):
-        data = struct.unpack("{}4i".format(e), f.read(16))
+        data = struct.unpack("{}4I".format(e), f.read(16))
         name = read_string(f, read_offset(f))
         tex_offset, = struct.unpack("{}I".format(e), f.read(4))
         unk, = struct.unpack("{}I".format(e), f.read(4))
+        type_ = data[3] >> 24
         tex_data.append({'name': name, 'dwWidth': data[0], 'dwHeight': data[1], 'dwMipMapCount': data[2],
-            'type': known_tex_types[data[3]] if data[3] in known_tex_types else 'RAW',
+            'type': known_tex_types[type_] if type_ in known_tex_types else 'RAW',
             'offset': tex_offset + tex_data_offset, 'unk': unk})
     textures = []
     for i in range(len(tex_data)):
@@ -403,6 +409,8 @@ def read_texture_section (f, start_offset, tex_data_offset, tex_data_block_size)
             size = (tex_data_offset + tex_data_block_size) - tex_data[i]['offset']
         f.seek(tex_data[i]['offset'])
         raw_data = f.read(size)
+        if e == '>' and tex_data[i]['type'] == 'BGRA32':
+            raw_data = endian_swap_argb (raw_data)
         textures.append({'name': "{0}.{1}".format(tex_data[i]['name'], 'raw' if tex_data[i]['type'] == 'RAW' else 'dds'),
             'data': raw_data if tex_data[i]['type'] == 'RAW' else make_dds_header(tex_data[i]) + raw_data})
     return(textures)
