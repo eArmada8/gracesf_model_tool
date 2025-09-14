@@ -535,6 +535,8 @@ def write_gltf(base_name, skel_struct, vgmaps, mesh_blocks_info, meshes, materia
     for i in range(len(mesh_blocks_info)):
         mesh_blocks_info[i]['mesh_v'] = '{0}_{1:02d}'.format(mesh_blocks_info[i]['mesh'], mesh_blocks_info[i]['vgmap'])
     mesh_node_ids = {x['mesh_v']:x['name'] for x in mesh_blocks_info}
+    if not 'children' in gltf_data['nodes'][0]:
+        gltf_data['nodes'][0]['children'] = []
     for mesh_node_id in mesh_node_ids:
         if not mesh_node_id in node_id_list:
             g_node = {'name': mesh_node_ids[mesh_node_id]}
