@@ -757,7 +757,7 @@ def process_model (f, base_name, overwrite = False, write_raw_buffers = False, w
 def process_mdl (mdl_file, overwrite = False, write_raw_buffers = False, write_binary_gltf = True):
     base_name = mdl_file[:-4]
     with open(mdl_file, 'rb') as f:
-        process_model (f, base_name, overwrite = False, write_raw_buffers = False, write_binary_gltf = True)
+        process_model (f, base_name, overwrite = overwrite, write_raw_buffers = write_raw_buffers, write_binary_gltf = write_binary_gltf)
 
 if __name__ == "__main__":
     # Set current directory
