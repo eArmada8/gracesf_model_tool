@@ -1,8 +1,8 @@
 # Tales of Graces f (PS3) mesh export
-A script to get the mesh data out of the files from Tales of Graces f (PS3).  The output is in .glb files, although there is an option for .fmt/.ib/.vb/.vgmap that are compatible with DarkStarSword Blender import plugin for 3DMigoto.
+A script to get the mesh data out of the files from Tales of Graces f (PS3) and, experimentally, from Tales of Graces (Wii).  The output is in .glb files, although there is an option for .fmt/.ib/.vb/.vgmap that are compatible with DarkStarSword Blender import plugin for 3DMigoto.
 
 ## Credits:
-I am as always very thankful for the dedicated reverse engineers at the Tales of ABCDE discord and the Kiseki modding discord, for their brilliant work, and for sharing that work so freely.  Thank you to NeXoGone and the original author of the noesis scripts for this game for structural information as well!  Thank you to Mc-muffin (github.com/Mc-muffin) for the python CompToE decompression implementation used unmodified in this tool, and thank you to Life Bottle (github.com/lifebottle) for writing the original CompToE implementation.
+I am as always very thankful for the dedicated reverse engineers at the Tales of ABCDE discord and the Kiseki modding discord, for their brilliant work, and for sharing that work so freely.  Thank you to NeXoGone and the original author of the noesis scripts for this game for structural information as well!  Thank you to Mc-muffin (github.com/Mc-muffin) for the python CompToE decompression implementation used unmodified in this tool, and thank you to Life Bottle (github.com/lifebottle) for writing the original CompToE implementation.  Thank you to the Dolphin emulator team for reverse engineering the CMPR texture format.
 
 ## Requirements:
 1. Python 3.10 and newer is required for use of these scripts.  It is free from the Microsoft Store, for Windows users.  For Linux users, please consult your distro.
@@ -32,7 +32,7 @@ Shows help message.
 Overwrite existing files without prompting.
 
 ### gracesf_export_model_acf.py
-Double click the python script and it will search for all model and texture .acf/.dat files and process them directly; any .MDL files and .TEX files within will be processed.  (Relevant files in the .cpk archives will have an .acf extension, but DLC acf files come with a .dat extension.)  Textures will be placed in a `textures` folder.  This script requires both gracesf_export_model.py and lib_fmtibvb.py to function.
+Double click the python script and it will search for all model and texture .acf/.dat files and process them directly; any .MDL files and .TEX files within will be processed.  (Relevant files in the .cpk archives will have an .acf extension, but DLC acf files come with a .dat extension.)  Textures will be placed in a `textures` folder.  *Requires `gracesf_export_model.py` and `lib_fmtibvb.py` to be in the same folder due to shared decoding functions.*
 
 **Command line arguments:**
 `gracesf_export_model_acf.py [-h] [-t] [-d] [-o] acf_file`
@@ -57,3 +57,21 @@ Double click the python script and it will search for all texture files (decompr
 
 `-h, --help`
 Shows help message.
+
+### graces_wii_export_model.py
+Double click the python script and it will search for all model files (decompressed .MDL files).  Textures will be placed in a `textures` folder.  *Requires `gracesf_export_model.py` and `lib_fmtibvb.py` to be in the same folder due to shared decoding functions.*
+
+**Command line arguments:**
+`graces_wii_export_model.py [-h] [-t] [-d] [-o] mdl_file`
+
+`-t, --textformat`
+Output .gltf/.bin format instead of .glb format.
+
+`-d, --dumprawbuffers`
+Dump .fmt/.ib/.vb/.vgmap files in a folder with the same name as the .mdl file.  Use DarkStarSword's plugin to view.
+
+`-h, --help`
+Shows help message.
+
+`-o, --overwrite`
+Overwrite existing files without prompting.
